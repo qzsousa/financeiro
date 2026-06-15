@@ -1,0 +1,320 @@
+{% extends "base.html" %}
+{% block content %}
+
+{# ── Flash messages ── #}
+{% set flash_msgs = {
+  'salario_salvo': ('ok', 'Salário atualizado.'),
+  'conta_adicionada': ('ok', 'Conta adicionada.'),
+  'conta_paga': ('ok', 'Conta marcada como paga.'),
+  'pagamento_desfeito': ('warn', 'Pagamento desfeito.'),
+  'conta_removida': ('ok', 'Conta removida.'),
+  'transacao_adicionada': ('ok', 'Transação registrada.'),
+  'transacao_removida': ('ok', 'Transação removida.'),
+  'valor_invalido': ('err', 'Valor deve ser maior que zero.'),
+} %}
+{% if flash and flash in flash_msgs %}
+  {% set fm = flash_msgs[flash] %}
+  <div class="flash flash-{{ fm[0] }}" id="flash-msg">{{ fm[1] }}</div>
+{% endif %}
+
+{# ── Alertas ── #}
+{% if overdue %}
+<div class="alert alert-error">
+  <strong>{{ overdue|length }} conta{{ 's' if overdue|length > 1 }} vencida{{ 's' if overdue|length > 1 }}:</strong>
+  {{ overdue|map(attribute='description')|join(', ') }}
+</div>
+{% endif %}
+{% if due_soon %}
+<div class="alert alert-warn">
+  <strong>Vence em breve:</strong>
+  {% for b in due_soon %}
+    {{ b.description }}
+    ({% set d = dias_ate(b.due_date) %}{% if d == 0 %}hoje{% else %}em {{ d }} dia{{ 's' if d > 1 }}{% endif %}){% if not loop.last %}, {% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ══════════════════════════ VISÃO GERAL ══════════════════════════ #}
+<section id="visao-geral" style="margin-bottom:56px;">
+  <h2 class="page-title">Visão Geral</h2>
+  <p class="page-sub">{{ mes_nome | capitalize }}</p>
+
+  <div class="stat-grid">
+    <div class="stat-card">
+      <p class="stat-label">Salário mensal</p>
+      <p class="stat-value stat-blue" id="salary-display" style="cursor:pointer" onclick="toggleSalaryForm()">
+        {{ fmt_brl(user.salary) }}
+        <span style="font-size:11px;color:var(--text3);margin-left:6px;">editar</span>
+      </p>
+      <form method="post" action="/salary" id="salary-form" style="display:none;margin-top:8px;">
+        <div style="display:flex;gap:8px;">
+          <input type="number" step="0.01" min="0" name="salary" value="{{ user.salary }}" style="font-size:13px;" autofocus/>
+          <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
+          <button type="button" class="btn btn-sm" onclick="toggleSalaryForm()">Cancelar</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="stat-card">
+      <p class="stat-label">Contas pendentes</p>
+      <p class="stat-value stat-red">{{ fmt_brl(total_contas) }}</p>
+      <p class="stat-sub">{{ pending_bills|length }} conta{{ 's' if pending_bills|length != 1 }}</p>
+    </div>
+
+    <div class="stat-card">
+      <p class="stat-label">Saldo restante</p>
+      <p class="stat-value {{ 'stat-green' if saldo >= 0 else 'stat-red' }}">
+        {{ fmt_brl(saldo) }}
+      </p>
+    </div>
+
+    <div class="stat-card">
+      <p class="stat-label">Receitas do mês</p>
+      <p class="stat-value stat-green">{{ fmt_brl(total_receitas) }}</p>
+      <p class="stat-sub">Despesas: {{ fmt_brl(total_despesas) }}</p>
+    </div>
+  </div>
+
+  {# Barra de comprometimento #}
+  {% if user.salary > 0 %}
+  <div class="card" style="margin-bottom:24px;">
+    <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+      <span style="font-size:12px;color:var(--text3);">Comprometimento do salário</span>
+      <span style="font-size:12px;color:var(--text2);font-family:var(--mono);">{{ bar_pct }}%</span>
+    </div>
+    <div class="salary-bar-wrap">
+      <div class="salary-bar-fill" style="width:{{ bar_pct }}%;background:{{ 'var(--red)' if bar_pct > 85 else ('var(--amber)' if bar_pct > 60 else 'var(--green)') }};"></div>
+    </div>
+    <p style="font-size:11.5px;color:var(--text3);margin-top:6px;">
+      {{ fmt_brl(total_contas) }} comprometido de {{ fmt_brl(user.salary) }}
+    </p>
+  </div>
+  {% endif %}
+
+  {# Próximas contas #}
+  <div class="section-header">
+    <span class="section-title">Próximas contas</span>
+    <a href="#contas" class="btn btn-sm">Ver todas</a>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden;">
+    {% if not pending_bills %}
+      <p class="empty">Nenhuma conta pendente.</p>
+    {% else %}
+    <table class="bills-table">
+      <thead><tr>
+        <th>Descrição</th><th>Categoria</th><th>Vencimento</th>
+        <th style="text-align:right;">Valor</th><th>Status</th>
+      </tr></thead>
+      <tbody>
+      {% for b in pending_bills[:6] %}
+        {% set d = dias_ate(b.due_date) %}
+        <tr class="{{ 'row-overdue' if d < 0 else '' }}">
+          <td>{{ b.description }}</td>
+          <td style="color:var(--text3);">{{ b.category }}</td>
+          <td style="font-family:var(--mono);font-size:12.5px;">{{ b.due_date.strftime('%d/%m/%Y') }}</td>
+          <td style="text-align:right;font-family:var(--mono);color:var(--red);">{{ fmt_brl(b.amount) }}</td>
+          <td>
+            {% if d < 0 %}<span class="tag tag-overdue">{{ d|abs }}d atraso</span>
+            {% elif d <= 7 %}<span class="tag tag-due-soon">{{ d }}d</span>
+            {% else %}<span class="tag tag-pending">Pendente</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+</section>
+
+{# ══════════════════════════ CONTAS ══════════════════════════ #}
+<section id="contas" style="margin-bottom:56px;">
+  <div class="section-header">
+    <div>
+      <h2 class="page-title">Contas a Pagar</h2>
+      <p class="page-sub">Vencidas primeiro, depois por data de vencimento</p>
+    </div>
+    <button class="btn btn-primary" onclick="toggleForm('bill-form')">+ Nova conta</button>
+  </div>
+
+  <div class="card" id="bill-form" style="display:none;margin-bottom:20px;">
+    <p style="font-size:13px;font-weight:600;margin-bottom:14px;color:var(--text2);">Nova conta</p>
+    <form method="post" action="/bills">
+      <div class="form-row form-grid-4">
+        <div><label>Descrição</label><input name="description" placeholder="Ex: Cartão Nubank" required/></div>
+        <div><label>Valor</label><input type="number" step="0.01" min="0.01" name="amount" placeholder="0,00" required/></div>
+        <div><label>Categoria</label><input name="category" placeholder="Ex: Cartão de crédito"/></div>
+        <div><label>Vencimento</label><input type="date" name="due_date" required/></div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button type="submit" class="btn btn-primary">Adicionar</button>
+        <button type="button" class="btn" onclick="toggleForm('bill-form')">Cancelar</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden;">
+    {% if not bills %}
+      <p class="empty">Nenhuma conta cadastrada. Clique em "+ Nova conta" para começar.</p>
+    {% else %}
+    <table class="bills-table">
+      <thead><tr>
+        <th style="width:36px;">Pago</th>
+        <th>Descrição</th>
+        <th>Categoria</th>
+        <th>Vencimento</th>
+        <th>Data pago</th>
+        <th style="text-align:right;">Valor</th>
+        <th>Status</th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+      {% for b in bills %}
+        {% set d = dias_ate(b.due_date) %}
+        <tr class="{{ 'row-paid' if b.status == 'paid' else ('row-overdue' if d < 0 else '') }}">
+          <td style="text-align:center;">
+            {% if b.status == 'paid' %}
+              <form method="post" action="/bills/{{ b.id }}/desfazer" style="display:inline;">
+                <input type="checkbox" checked onchange="this.form.submit()" title="Desmarcar como pago"/>
+              </form>
+            {% else %}
+              <input type="checkbox" onchange="submitPay(this, {{ b.id }})"/>
+            {% endif %}
+          </td>
+          <td style="font-weight:500;">{{ b.description }}</td>
+          <td style="color:var(--text3);">{{ b.category }}</td>
+          <td style="font-family:var(--mono);font-size:12.5px;">{{ b.due_date.strftime('%d/%m/%Y') }}</td>
+          <td>
+            {% if b.status == 'paid' %}
+              <span style="font-family:var(--mono);font-size:12.5px;color:var(--green);">
+                {{ b.paid_at.strftime('%d/%m/%Y') if b.paid_at else '—' }}
+              </span>
+            {% else %}
+              <input type="date" id="paid-at-{{ b.id }}" value="{{ hoje }}"
+                style="width:135px;font-size:12px;padding:4px 8px;"/>
+            {% endif %}
+          </td>
+          <td style="text-align:right;font-family:var(--mono);color:{{ 'var(--text3)' if b.status == 'paid' else 'var(--red)' }};">
+            {{ fmt_brl(b.amount) }}
+          </td>
+          <td>
+            {% if b.status == 'paid' %}<span class="tag tag-paid">Pago</span>
+            {% elif d < 0 %}<span class="tag tag-overdue">{{ d|abs }}d atraso</span>
+            {% elif d <= 7 %}<span class="tag tag-due-soon">vence em {{ d }}d</span>
+            {% else %}<span class="tag tag-pending">Pendente</span>{% endif %}
+          </td>
+          <td>
+            <form method="post" action="/bills/{{ b.id }}/deletar" style="display:inline;"
+              onsubmit="return confirm('Remover esta conta?')">
+              <button type="submit" class="btn btn-ghost btn-sm btn-danger" title="Remover">✕</button>
+            </form>
+          </td>
+        </tr>
+        <form id="pay-form-{{ b.id }}" method="post" action="/bills/{{ b.id }}/pagar" style="display:none;">
+          <input type="hidden" name="paid_at" id="paid-at-hidden-{{ b.id }}"/>
+        </form>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
+  {% if bills %}
+  <div style="display:flex;gap:24px;margin-top:14px;justify-content:flex-end;">
+    {% set total_pago = bills|selectattr('status','eq','paid')|sum(attribute='amount') %}
+    {% set total_pend = pending_bills|sum(attribute='amount') %}
+    <span style="font-size:12px;color:var(--text3);">Pago: <span style="color:var(--green);font-family:var(--mono);">{{ fmt_brl(total_pago) }}</span></span>
+    <span style="font-size:12px;color:var(--text3);">Pendente: <span style="color:var(--amber);font-family:var(--mono);">{{ fmt_brl(total_pend) }}</span></span>
+    <span style="font-size:12px;color:var(--text3);">Total: <span style="color:var(--text);font-family:var(--mono);">{{ fmt_brl(bills|sum(attribute='amount')) }}</span></span>
+  </div>
+  {% endif %}
+</section>
+
+{# ══════════════════════════ TRANSAÇÕES ══════════════════════════ #}
+<section id="transacoes">
+  <div class="section-header">
+    <div>
+      <h2 class="page-title">Transações</h2>
+      <p class="page-sub">{{ mes_nome | capitalize }}</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      {# Filtro de mês #}
+      {% if meses_disponiveis %}
+      <select onchange="filtrarMes(this.value)" style="width:auto;padding:6px 10px;font-size:12.5px;">
+        {% for (a, m) in meses_disponiveis %}
+          <option value="{{ m }}/{{ a }}" {{ 'selected' if m == mes_atual and a == ano_atual }}>
+            {{ ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][m] }}/{{ a }}
+          </option>
+        {% endfor %}
+      </select>
+      {% endif %}
+      <button class="btn btn-primary" onclick="toggleForm('tx-form')">+ Nova transação</button>
+    </div>
+  </div>
+
+  <div class="card" id="tx-form" style="display:none;margin-bottom:20px;">
+    <p style="font-size:13px;font-weight:600;margin-bottom:14px;color:var(--text2);">Nova transação</p>
+    <form method="post" action="/transactions">
+      <div class="form-row form-grid-4">
+        <div><label>Descrição</label><input name="description" placeholder="Ex: Freelance, Mercado" required/></div>
+        <div><label>Valor</label><input type="number" step="0.01" min="0.01" name="amount" placeholder="0,00" required/></div>
+        <div>
+          <label>Tipo</label>
+          <select name="type">
+            <option value="expense">Despesa</option>
+            <option value="income">Receita</option>
+          </select>
+        </div>
+        <div><label>Categoria</label><input name="category" placeholder="Ex: Alimentação"/></div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button type="submit" class="btn btn-primary">Adicionar</button>
+        <button type="button" class="btn" onclick="toggleForm('tx-form')">Cancelar</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden;">
+    {% if not transactions %}
+      <p class="empty">Nenhuma transação em {{ mes_nome }}.</p>
+    {% else %}
+    <table class="bills-table">
+      <thead><tr>
+        <th>Descrição</th><th>Categoria</th><th>Data</th><th>Tipo</th>
+        <th style="text-align:right;">Valor</th><th></th>
+      </tr></thead>
+      <tbody>
+      {% for t in transactions %}
+        <tr>
+          <td style="font-weight:500;">{{ t.description }}</td>
+          <td style="color:var(--text3);">{{ t.category }}</td>
+          <td style="font-family:var(--mono);font-size:12.5px;">{{ t.date.strftime('%d/%m/%Y') }}</td>
+          <td>
+            <span class="tag {{ 'tag-paid' if t.type == 'income' else 'tag-overdue' }}">
+              {{ 'Receita' if t.type == 'income' else 'Despesa' }}
+            </span>
+          </td>
+          <td style="text-align:right;font-family:var(--mono);font-weight:500;color:{{ 'var(--green)' if t.type == 'income' else 'var(--red)' }};">
+            {{ '+' if t.type == 'income' else '-' }}{{ fmt_brl(t.amount) }}
+          </td>
+          <td>
+            <form method="post" action="/transactions/{{ t.id }}/deletar" style="display:inline;"
+              onsubmit="return confirm('Remover esta transação?')">
+              <button type="submit" class="btn btn-ghost btn-sm btn-danger" title="Remover">✕</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+
+    {# Totais do mês #}
+    <div style="display:flex;gap:24px;padding:12px 16px;border-top:1px solid var(--line);justify-content:flex-end;">
+      <span style="font-size:12px;color:var(--text3);">Receitas: <span style="color:var(--green);font-family:var(--mono);">{{ fmt_brl(total_receitas) }}</span></span>
+      <span style="font-size:12px;color:var(--text3);">Despesas: <span style="color:var(--red);font-family:var(--mono);">{{ fmt_brl(total_despesas) }}</span></span>
+      <span style="font-size:12px;color:var(--text3);">Saldo: <span style="color:{{ 'var(--green)' if total_receitas >= total_despesas else 'var(--red)' }};font-family:var(--mono);">{{ fmt_brl(total_receitas - total_despesas) }}</span></span>
+    </div>
+    {% endif %}
+  </div>
+</section>
+
+{% endblock %}

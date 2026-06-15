@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Finanças</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/static/css/style.css"/>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h1>Finanças</h1>
+      <p>{{ user.name }}</p>
+    </div>
+
+    <a href="/dashboard#visao-geral" class="nav-item {% if active == 'visao-geral' %}active{% endif %}">
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2h5v5H2V2zm0 7h5v5H2V9zm7-7h5v5H9V2zm0 7h5v5H9V9z"/></svg>
+      Visão Geral
+    </a>
+    <a href="/dashboard#contas" class="nav-item {% if active == 'contas' %}active{% endif %}">
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3a1 1 0 011-1h12a1 1 0 011 1v2H1V3zm0 4h14v6a1 1 0 01-1 1H2a1 1 0 01-1-1V7zm4 3a1 1 0 000 2h2a1 1 0 000-2H5z"/></svg>
+      Contas a Pagar
+    </a>
+    <a href="/dashboard#transacoes" class="nav-item {% if active == 'transacoes' %}active{% endif %}">
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zM4.5 8.5h7m-5-3l-2 3 2 3m3-6l2 3-2 3" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+      Transações
+    </a>
+
+    <div class="sidebar-footer">
+      <p class="sidebar-user">{{ user.email }}</p>
+      <a href="/logout" class="btn btn-ghost" style="width:100%;display:block;text-align:left;padding:6px 0;">Sair</a>
+    </div>
+  </aside>
+
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+<script src="/static/js/app.js"></script>
+</body>
+</html>
