@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 
 from auth import get_usuario_atual
 from database import get_session
-from models import Bill, Transaction, User
+from models import Bill, Income, Transaction, User
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -21,7 +21,6 @@ def fmt_brl(value: float) -> str:
 
 
 def atualizar_overdue(bills: list, session: Session):
-    """Marca como overdue contas pending vencidas. Só commita se houver mudança."""
     mudou = False
     for b in bills:
         if b.status == "pending" and dias_ate(b.due_date) < 0:
@@ -52,6 +51,11 @@ def dashboard(
     bills = session.exec(
         select(Bill).where(Bill.user_id == user.id).order_by(Bill.due_date)
     ).all()
+
+    incomes = session.exec(
+        select(Income).where(Income.user_id == user.id).order_by(Income.date.desc())
+    ).all()
+
     transactions = session.exec(
         select(Transaction)
         .where(Transaction.user_id == user.id)
@@ -70,26 +74,48 @@ def dashboard(
 
     bills_sorted = sorted(bills, key=sort_key)
 
+    # Contas pendentes (não pagas)
     pending_bills = [b for b in bills if b.status != "paid"]
-    total_contas = sum(b.amount for b in pending_bills)
-    saldo = user.salary - total_contas
-    due_soon = [b for b in bills if b.status != "paid" and 0 <= dias_ate(b.due_date) <= 7]
-    overdue = [b for b in bills if b.status == "overdue"]
 
-    # Transações filtradas pelo mês/ano selecionado
+    # ── Saldo corrigido ──────────────────────────────────────────
+    # O salário é mensal: dinheiro já comprometido NÃO volta quando pago.
+    # Saldo = salário - TODAS as contas (pagas e pendentes do mês/ciclo).
+    # Assim, marcar como pago apenas registra o pagamento, não "devolve" dinheiro.
+    total_todas_contas = sum(b.amount for b in bills)
+    total_pendentes    = sum(b.amount for b in pending_bills)
+
+    # Entradas extras do mês filtrado
+    incomes_mes = [i for i in incomes if i.date.month == mes and i.date.year == ano]
+    total_entradas_extras = sum(i.amount for i in incomes_mes)
+
+    # Saldo real = salário + entradas extras - todas as contas
+    saldo = user.salary + total_entradas_extras - total_todas_contas
+
+    due_soon = [b for b in bills if b.status != "paid" and 0 <= dias_ate(b.due_date) <= 7]
+    overdue  = [b for b in bills if b.status == "overdue"]
+
+    # Contas pagas no dinheiro este ciclo — para o card de saque
+    contas_dinheiro_pendentes = [
+        b for b in pending_bills if b.payment_method == "dinheiro"
+    ]
+    total_dinheiro_pendente = sum(b.amount for b in contas_dinheiro_pendentes)
+
+    # Transações filtradas pelo mês/ano
     tx_mes = [t for t in transactions if t.date.month == mes and t.date.year == ano]
     total_receitas = sum(t.amount for t in tx_mes if t.type == "income")
     total_despesas = sum(t.amount for t in tx_mes if t.type == "expense")
 
-    bar_pct = round(min((total_contas / user.salary) * 100, 100)) if user.salary > 0 else 0
+    # Barra de comprometimento usa total de todas as contas vs salário + entradas
+    renda_total = user.salary + total_entradas_extras
+    bar_pct = round(min((total_todas_contas / renda_total) * 100, 100)) if renda_total > 0 else 0
 
-    # Meses disponíveis para filtro (com transações)
+    # Meses disponíveis para filtro
     meses_disponiveis = sorted(
-        set((t.date.year, t.date.month) for t in transactions),
+        set((t.date.year, t.date.month) for t in transactions)
+        | set((i.date.year, i.date.month) for i in incomes),
         reverse=True,
     )
 
-    # Flash message da query string
     flash = request.query_params.get("msg", "")
 
     return templates.TemplateResponse("dashboard.html", {
@@ -97,12 +123,18 @@ def dashboard(
         "user": user,
         "bills": bills_sorted,
         "pending_bills": pending_bills,
+        "incomes": incomes_mes,
+        "all_incomes": incomes,
         "transactions": tx_mes,
         "all_transactions": transactions,
-        "total_contas": total_contas,
+        "total_todas_contas": total_todas_contas,
+        "total_pendentes": total_pendentes,
+        "total_entradas_extras": total_entradas_extras,
         "saldo": saldo,
         "due_soon": due_soon,
         "overdue": overdue,
+        "contas_dinheiro_pendentes": contas_dinheiro_pendentes,
+        "total_dinheiro_pendente": total_dinheiro_pendente,
         "total_receitas": total_receitas,
         "total_despesas": total_despesas,
         "bar_pct": bar_pct,
@@ -132,6 +164,49 @@ def salvar_salario(
     return RedirectResponse(url="/dashboard?msg=salario_salvo", status_code=302)
 
 
+# ── Entradas extras ──────────────────────────────────────
+@router.post("/incomes")
+def criar_entrada(
+    description: str = Form(...),
+    amount: float = Form(...),
+    category: str = Form("Outros"),
+    date: str = Form(""),
+    user: User = Depends(get_usuario_atual),
+    session: Session = Depends(get_session),
+):
+    if amount <= 0:
+        return RedirectResponse(url="/dashboard?msg=valor_invalido#entradas", status_code=302)
+
+    try:
+        data_dt = datetime.strptime(date, "%Y-%m-%d") if date else datetime.utcnow()
+    except ValueError:
+        data_dt = datetime.utcnow()
+
+    income = Income(
+        description=description.strip(),
+        amount=amount,
+        category=category.strip() or "Outros",
+        date=data_dt,
+        user_id=user.id,
+    )
+    session.add(income)
+    session.commit()
+    return RedirectResponse(url="/dashboard?msg=entrada_adicionada#entradas", status_code=302)
+
+
+@router.post("/incomes/{income_id}/deletar")
+def deletar_entrada(
+    income_id: int,
+    user: User = Depends(get_usuario_atual),
+    session: Session = Depends(get_session),
+):
+    income = session.get(Income, income_id)
+    if income and income.user_id == user.id:
+        session.delete(income)
+        session.commit()
+    return RedirectResponse(url="/dashboard?msg=entrada_removida#entradas", status_code=302)
+
+
 # ── Contas ───────────────────────────────────────────────
 @router.post("/bills")
 def criar_conta(
@@ -139,6 +214,7 @@ def criar_conta(
     amount: float = Form(...),
     category: str = Form("Outros"),
     due_date: str = Form(...),
+    payment_method: str = Form(""),
     user: User = Depends(get_usuario_atual),
     session: Session = Depends(get_session),
 ):
@@ -150,6 +226,7 @@ def criar_conta(
         amount=amount,
         category=category.strip() or "Outros",
         due_date=datetime.strptime(due_date, "%Y-%m-%d"),
+        payment_method=payment_method or None,
         user_id=user.id,
     )
     session.add(bill)
@@ -204,6 +281,21 @@ def deletar_conta(
         session.delete(bill)
         session.commit()
     return RedirectResponse(url="/dashboard?msg=conta_removida#contas", status_code=302)
+
+
+# ── Saque em dinheiro ─────────────────────────────────────
+@router.post("/cash-withdraw")
+def atualizar_saque(
+    cash_withdrawn: str = Form(""),   # "on" se checkbox marcado
+    user: User = Depends(get_usuario_atual),
+    session: Session = Depends(get_session),
+):
+    db_user = session.get(User, user.id)
+    if db_user:
+        db_user.cash_withdrawn = (cash_withdrawn == "on")
+        session.add(db_user)
+        session.commit()
+    return RedirectResponse(url="/dashboard?msg=saque_atualizado#contas", status_code=302)
 
 
 # ── Transações ───────────────────────────────────────────

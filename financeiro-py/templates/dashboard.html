@@ -3,14 +3,17 @@
 
 {# ── Flash messages ── #}
 {% set flash_msgs = {
-  'salario_salvo': ('ok', 'Salário atualizado.'),
-  'conta_adicionada': ('ok', 'Conta adicionada.'),
-  'conta_paga': ('ok', 'Conta marcada como paga.'),
-  'pagamento_desfeito': ('warn', 'Pagamento desfeito.'),
-  'conta_removida': ('ok', 'Conta removida.'),
-  'transacao_adicionada': ('ok', 'Transação registrada.'),
-  'transacao_removida': ('ok', 'Transação removida.'),
-  'valor_invalido': ('err', 'Valor deve ser maior que zero.'),
+  'salario_salvo':       ('ok',   'Salário atualizado.'),
+  'conta_adicionada':    ('ok',   'Conta adicionada.'),
+  'conta_paga':          ('ok',   'Conta marcada como paga.'),
+  'pagamento_desfeito':  ('warn', 'Pagamento desfeito.'),
+  'conta_removida':      ('ok',   'Conta removida.'),
+  'entrada_adicionada':  ('ok',   'Entrada registrada.'),
+  'entrada_removida':    ('ok',   'Entrada removida.'),
+  'transacao_adicionada':('ok',   'Transação registrada.'),
+  'transacao_removida':  ('ok',   'Transação removida.'),
+  'saque_atualizado':    ('ok',   'Status do saque atualizado.'),
+  'valor_invalido':      ('err',  'Valor deve ser maior que zero.'),
 } %}
 {% if flash and flash in flash_msgs %}
   {% set fm = flash_msgs[flash] %}
@@ -34,12 +37,45 @@
 </div>
 {% endif %}
 
+{# ── Card de saque em dinheiro ── #}
+{% if contas_dinheiro_pendentes %}
+<div class="card cash-card" style="margin-bottom:16px;border-left:3px solid var(--amber);background:var(--amber-bg);">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+    <div>
+      <p style="font-size:12px;color:var(--amber);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">
+        💵 Lembre-se de sacar dinheiro
+      </p>
+      <p style="font-size:20px;font-weight:600;font-family:var(--mono);color:var(--amber);">
+        {{ fmt_brl(total_dinheiro_pendente) }}
+      </p>
+      <p style="font-size:12px;color:var(--text3);margin-top:4px;">
+        {% for b in contas_dinheiro_pendentes %}{{ b.description }}{% if not loop.last %}, {% endif %}{% endfor %}
+      </p>
+    </div>
+    <form method="post" action="/cash-withdraw" style="display:flex;align-items:center;gap:10px;margin-top:4px;">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text2);margin:0;">
+        <input type="checkbox" name="cash_withdrawn"
+          {% if user.cash_withdrawn %}checked{% endif %}
+          onchange="this.form.submit()"
+          style="width:16px;height:16px;accent-color:var(--green);"/>
+        Já saquei
+      </label>
+    </form>
+  </div>
+  {% if user.cash_withdrawn %}
+  <p style="font-size:12px;color:var(--green);margin-top:8px;">✓ Saque confirmado</p>
+  {% endif %}
+</div>
+{% endif %}
+
 {# ══════════════════════════ VISÃO GERAL ══════════════════════════ #}
 <section id="visao-geral" style="margin-bottom:56px;">
   <h2 class="page-title">Visão Geral</h2>
   <p class="page-sub">{{ mes_nome | capitalize }}</p>
 
   <div class="stat-grid">
+
+    {# Salário #}
     <div class="stat-card">
       <p class="stat-label">Salário mensal</p>
       <p class="stat-value stat-blue" id="salary-display" style="cursor:pointer" onclick="toggleSalaryForm()">
@@ -53,40 +89,53 @@
           <button type="button" class="btn btn-sm" onclick="toggleSalaryForm()">Cancelar</button>
         </div>
       </form>
+      {% if total_entradas_extras > 0 %}
+      <p class="stat-sub">+ {{ fmt_brl(total_entradas_extras) }} entradas extras</p>
+      {% endif %}
     </div>
 
+    {# Total de contas (todas, independente de pagas ou não) #}
     <div class="stat-card">
-      <p class="stat-label">Contas pendentes</p>
-      <p class="stat-value stat-red">{{ fmt_brl(total_contas) }}</p>
-      <p class="stat-sub">{{ pending_bills|length }} conta{{ 's' if pending_bills|length != 1 }}</p>
+      <p class="stat-label">Total de contas</p>
+      <p class="stat-value stat-red">{{ fmt_brl(total_todas_contas) }}</p>
+      <p class="stat-sub">
+        {{ pending_bills|length }} pendente{{ 's' if pending_bills|length != 1 }}
+        · {{ fmt_brl(total_pendentes) }}
+      </p>
     </div>
 
+    {# Saldo real = salário + entradas - todas as contas #}
     <div class="stat-card">
       <p class="stat-label">Saldo restante</p>
       <p class="stat-value {{ 'stat-green' if saldo >= 0 else 'stat-red' }}">
         {{ fmt_brl(saldo) }}
       </p>
+      <p class="stat-sub" style="font-size:11px;">
+        {{ fmt_brl(user.salary + total_entradas_extras) }} − {{ fmt_brl(total_todas_contas) }}
+      </p>
     </div>
 
+    {# Entradas extras do mês #}
     <div class="stat-card">
-      <p class="stat-label">Receitas do mês</p>
-      <p class="stat-value stat-green">{{ fmt_brl(total_receitas) }}</p>
-      <p class="stat-sub">Despesas: {{ fmt_brl(total_despesas) }}</p>
+      <p class="stat-label">Entradas extras</p>
+      <p class="stat-value stat-green">{{ fmt_brl(total_entradas_extras) }}</p>
+      <p class="stat-sub">{{ incomes|length }} entrada{{ 's' if incomes|length != 1 }} em {{ mes_nome }}</p>
     </div>
+
   </div>
 
   {# Barra de comprometimento #}
-  {% if user.salary > 0 %}
+  {% if (user.salary + total_entradas_extras) > 0 %}
   <div class="card" style="margin-bottom:24px;">
     <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
-      <span style="font-size:12px;color:var(--text3);">Comprometimento do salário</span>
+      <span style="font-size:12px;color:var(--text3);">Comprometimento da renda</span>
       <span style="font-size:12px;color:var(--text2);font-family:var(--mono);">{{ bar_pct }}%</span>
     </div>
     <div class="salary-bar-wrap">
       <div class="salary-bar-fill" style="width:{{ bar_pct }}%;background:{{ 'var(--red)' if bar_pct > 85 else ('var(--amber)' if bar_pct > 60 else 'var(--green)') }};"></div>
     </div>
     <p style="font-size:11.5px;color:var(--text3);margin-top:6px;">
-      {{ fmt_brl(total_contas) }} comprometido de {{ fmt_brl(user.salary) }}
+      {{ fmt_brl(total_todas_contas) }} comprometido de {{ fmt_brl(user.salary + total_entradas_extras) }}
     </p>
   </div>
   {% endif %}
@@ -126,6 +175,67 @@
   </div>
 </section>
 
+{# ══════════════════════════ ENTRADAS EXTRAS ══════════════════════════ #}
+<section id="entradas" style="margin-bottom:56px;">
+  <div class="section-header">
+    <div>
+      <h2 class="page-title">Entradas Extras</h2>
+      <p class="page-sub">Recebimentos além do salário — {{ mes_nome | capitalize }}</p>
+    </div>
+    <button class="btn btn-primary" onclick="toggleForm('income-form')">+ Nova entrada</button>
+  </div>
+
+  <div class="card" id="income-form" style="display:none;margin-bottom:20px;">
+    <p style="font-size:13px;font-weight:600;margin-bottom:14px;color:var(--text2);">Nova entrada</p>
+    <form method="post" action="/incomes">
+      <div class="form-row form-grid-4">
+        <div><label>Descrição</label><input name="description" placeholder="Ex: Freelance, Venda, Bônus" required/></div>
+        <div><label>Valor</label><input type="number" step="0.01" min="0.01" name="amount" placeholder="0,00" required/></div>
+        <div><label>Categoria</label><input name="category" placeholder="Ex: Freelance"/></div>
+        <div><label>Data</label><input type="date" name="date" value="{{ hoje }}"/></div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button type="submit" class="btn btn-primary">Adicionar</button>
+        <button type="button" class="btn" onclick="toggleForm('income-form')">Cancelar</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden;">
+    {% if not incomes %}
+      <p class="empty">Nenhuma entrada extra em {{ mes_nome }}.</p>
+    {% else %}
+    <table class="bills-table">
+      <thead><tr>
+        <th>Descrição</th><th>Categoria</th><th>Data</th>
+        <th style="text-align:right;">Valor</th><th></th>
+      </tr></thead>
+      <tbody>
+      {% for i in incomes %}
+        <tr>
+          <td style="font-weight:500;">{{ i.description }}</td>
+          <td style="color:var(--text3);">{{ i.category }}</td>
+          <td style="font-family:var(--mono);font-size:12.5px;">{{ i.date.strftime('%d/%m/%Y') }}</td>
+          <td style="text-align:right;font-family:var(--mono);color:var(--green);font-weight:500;">
+            +{{ fmt_brl(i.amount) }}
+          </td>
+          <td>
+            <form method="post" action="/incomes/{{ i.id }}/deletar" style="display:inline;"
+              onsubmit="return confirm('Remover esta entrada?')">
+              <button type="submit" class="btn btn-ghost btn-sm btn-danger" title="Remover">✕</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div style="display:flex;gap:24px;padding:12px 16px;border-top:1px solid var(--line);justify-content:flex-end;">
+      <span style="font-size:12px;color:var(--text3);">Total entradas: <span style="color:var(--green);font-family:var(--mono);">{{ fmt_brl(total_entradas_extras) }}</span></span>
+    </div>
+    {% endif %}
+  </div>
+</section>
+
 {# ══════════════════════════ CONTAS ══════════════════════════ #}
 <section id="contas" style="margin-bottom:56px;">
   <div class="section-header">
@@ -139,11 +249,20 @@
   <div class="card" id="bill-form" style="display:none;margin-bottom:20px;">
     <p style="font-size:13px;font-weight:600;margin-bottom:14px;color:var(--text2);">Nova conta</p>
     <form method="post" action="/bills">
-      <div class="form-row form-grid-4">
+      <div class="form-row" style="grid-template-columns:2fr 1fr 1fr 1fr 1fr;">
         <div><label>Descrição</label><input name="description" placeholder="Ex: Cartão Nubank" required/></div>
         <div><label>Valor</label><input type="number" step="0.01" min="0.01" name="amount" placeholder="0,00" required/></div>
         <div><label>Categoria</label><input name="category" placeholder="Ex: Cartão de crédito"/></div>
         <div><label>Vencimento</label><input type="date" name="due_date" required/></div>
+        <div>
+          <label>Forma de pagamento</label>
+          <select name="payment_method">
+            <option value="">— selecione —</option>
+            <option value="pix">Pix</option>
+            <option value="dinheiro">Dinheiro</option>
+            <option value="cartao">Cartão</option>
+          </select>
+        </div>
       </div>
       <div style="display:flex;gap:8px;">
         <button type="submit" class="btn btn-primary">Adicionar</button>
@@ -161,6 +280,7 @@
         <th style="width:36px;">Pago</th>
         <th>Descrição</th>
         <th>Categoria</th>
+        <th>Forma</th>
         <th>Vencimento</th>
         <th>Data pago</th>
         <th style="text-align:right;">Valor</th>
@@ -182,6 +302,17 @@
           </td>
           <td style="font-weight:500;">{{ b.description }}</td>
           <td style="color:var(--text3);">{{ b.category }}</td>
+          <td>
+            {% if b.payment_method == 'pix' %}
+              <span class="tag" style="background:#1a2433;color:#6b9fe4;">Pix</span>
+            {% elif b.payment_method == 'dinheiro' %}
+              <span class="tag" style="background:var(--amber-bg);color:var(--amber);">💵 Dinheiro</span>
+            {% elif b.payment_method == 'cartao' %}
+              <span class="tag" style="background:#1e1a2e;color:#a78bfa;">Cartão</span>
+            {% else %}
+              <span style="color:var(--text3);font-size:12px;">—</span>
+            {% endif %}
+          </td>
           <td style="font-family:var(--mono);font-size:12.5px;">{{ b.due_date.strftime('%d/%m/%Y') }}</td>
           <td>
             {% if b.status == 'paid' %}
@@ -219,12 +350,11 @@
   </div>
 
   {% if bills %}
-  <div style="display:flex;gap:24px;margin-top:14px;justify-content:flex-end;">
+  <div style="display:flex;gap:24px;margin-top:14px;justify-content:flex-end;flex-wrap:wrap;">
     {% set total_pago = bills|selectattr('status','eq','paid')|sum(attribute='amount') %}
-    {% set total_pend = pending_bills|sum(attribute='amount') %}
     <span style="font-size:12px;color:var(--text3);">Pago: <span style="color:var(--green);font-family:var(--mono);">{{ fmt_brl(total_pago) }}</span></span>
-    <span style="font-size:12px;color:var(--text3);">Pendente: <span style="color:var(--amber);font-family:var(--mono);">{{ fmt_brl(total_pend) }}</span></span>
-    <span style="font-size:12px;color:var(--text3);">Total: <span style="color:var(--text);font-family:var(--mono);">{{ fmt_brl(bills|sum(attribute='amount')) }}</span></span>
+    <span style="font-size:12px;color:var(--text3);">Pendente: <span style="color:var(--amber);font-family:var(--mono);">{{ fmt_brl(total_pendentes) }}</span></span>
+    <span style="font-size:12px;color:var(--text3);">Total: <span style="color:var(--text);font-family:var(--mono);">{{ fmt_brl(total_todas_contas) }}</span></span>
   </div>
   {% endif %}
 </section>
@@ -237,7 +367,6 @@
       <p class="page-sub">{{ mes_nome | capitalize }}</p>
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
-      {# Filtro de mês #}
       {% if meses_disponiveis %}
       <select onchange="filtrarMes(this.value)" style="width:auto;padding:6px 10px;font-size:12.5px;">
         {% for (a, m) in meses_disponiveis %}
@@ -307,7 +436,6 @@
       </tbody>
     </table>
 
-    {# Totais do mês #}
     <div style="display:flex;gap:24px;padding:12px 16px;border-top:1px solid var(--line);justify-content:flex-end;">
       <span style="font-size:12px;color:var(--text3);">Receitas: <span style="color:var(--green);font-family:var(--mono);">{{ fmt_brl(total_receitas) }}</span></span>
       <span style="font-size:12px;color:var(--text3);">Despesas: <span style="color:var(--red);font-family:var(--mono);">{{ fmt_brl(total_despesas) }}</span></span>

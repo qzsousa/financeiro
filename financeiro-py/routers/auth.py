@@ -9,16 +9,13 @@ from models import User
 
 router = APIRouter()
 
-from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader
 
-# Cria um ambiente Jinja2 com cache desabilitado
 env = Environment(
     loader=FileSystemLoader("templates"),
-    cache_size=0  # desativa o cache
+    cache_size=0
 )
 
-# Passa o ambiente personalizado para o Jinja2Templates
 templates = Jinja2Templates(env=env)
 
 @router.get("/login", response_class=HTMLResponse)
